@@ -52,7 +52,7 @@ describe("redactConfigSnapshot", () => {
     expect(restoreRedactedValues(result.config, config)).toEqual(config);
   });
 
-  it("redacts every string in an apiKey object without schema hints", () => {
+  it("preserves SecretRef identity and only redacts id in an apiKey object without schema hints", () => {
     const config = apiKeyConfig(
       { source: "env", provider: "default", id: "EXAMPLE_API_KEY" },
       "example",
@@ -60,13 +60,41 @@ describe("redactConfigSnapshot", () => {
     expect(redactConfigSnapshot(makeSnapshot(config)).config).toEqual(
       apiKeyConfig(
         {
-          source: REDACTED_SENTINEL,
-          provider: REDACTED_SENTINEL,
+          source: "env",
+          provider: "default",
           id: REDACTED_SENTINEL,
         },
         "example",
       ),
     );
+  });
+
+  it("heuristic fallback preserves SecretRef identity when no schema hint matches", () => {
+    const config = {
+      plugins: {
+        "some-plugin": {
+          oauthCredentials: {
+            source: "file",
+            provider: "secret-provider",
+            id: "actual-secret-id",
+          },
+        },
+      },
+    };
+
+    // No hints provided — triggers fallback path
+    const redacted = redactConfigSnapshot(makeSnapshot(config));
+
+    // source/provider should survive, only id redacted
+    expect(redacted.config.plugins["some-plugin"].oauthCredentials).toEqual({
+      source: "file",
+      provider: "secret-provider",
+      id: REDACTED_SENTINEL,
+    });
+
+    // Restoration should succeed (helper throws if it fails)
+    const restored = restoreRedactedValues(redacted.config, config);
+    expect(restored).toEqual(config);
   });
 
   it("redacts and restores MCP headers while leaving blank and env-backed values editable", () => {

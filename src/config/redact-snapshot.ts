@@ -268,6 +268,20 @@ function redactValue(
       } else {
         result[key] = value;
       }
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      isSecretRefShape(value as Record<string, unknown>)
+    ) {
+      // Heuristic SecretRef detection: preserve source/provider identity, only redact id
+      const secretRef = value as Record<string, unknown>;
+      const redacted = { ...secretRef };
+      if (typeof secretRef.id === "string" && isConcreteSensitiveString(secretRef.id)) {
+        values.push(secretRef.id);
+        redacted.id = REDACTED_SENTINEL;
+      }
+      result[key] = redacted;
     } else if (typeof value === "object" && value !== null) {
       result[key] = redactValue(value, path, values, fallbackContext);
     } else {
@@ -616,10 +630,12 @@ function restoreRedactedValue(
     if (value === REDACTED_SENTINEL && canRestore) {
       result[key] = restoreOriginalValueOrThrow(orig, key, candidate ?? path, context);
     } else if (typeof value === "object" && value !== null) {
-      const restoredSecretRef =
-        candidate || canRestore
-          ? maybeRestoreSecretRefId({ incoming: value, original: orig[key], path })
-          : { handled: false as const };
+      // Heuristic SecretRef detection: attempt restoration even without schema hints
+      const restoredSecretRef = maybeRestoreSecretRefId({
+        incoming: value,
+        original: orig[key],
+        path,
+      });
       result[key] = restoredSecretRef.handled
         ? restoredSecretRef.value
         : restoreRedactedValue(
